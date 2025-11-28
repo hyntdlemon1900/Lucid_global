@@ -105,7 +105,7 @@ class CombinedEstimator:
         self.job_names = self.train_data["jobname"].unique()
         if args.scheduler == "lucid":
             if "Venus" in args.experiment_name:
-                self.data = pd.read_csv(f"./estimator/ebm/{args.experiment_name}_ebm_weekly_updated.csv")
+                self.data = pd.read_csv(f"./estimator/ebm/{args.experiment_name}_ebm_weekly_updated.csv") # ./estimator/ebm/Venus_Sept_ebm_weekly_updated.csv"
             else:
                 raise NotImplementedError
             # NOTE

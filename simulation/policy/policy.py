@@ -8,20 +8,20 @@ from .placer.random import RandomPlacement
 
 
 class Policy:
-    def __init__(self, trace, vc, placement, log_dir, logger, start_ts):
+    def __init__(self, vc, placement, log_dir, logger):
         self._placement = placement
         self._vc = vc
         self._vc_name = vc.vc_name
         self._log_dir = log_dir
-        self.trace = trace.vc_trace(vc.vc_name)
+        #self.trace = trace.vc_trace(vc.vc_name)
         self.logger = logger
-        self.start_ts = start_ts
+        #self.start_ts = start_ts
 
-        self.total_job_num = self.trace.job_num()
+        #self.total_job_num = self.trace.job_num()
         self.que_list = []  # Pending Jobs
         self.run_list = []  # Running Jobs
         self.end_job_num = 0
-        self.time = start_ts
+        #self.time = start_ts
 
         # Time Sequence Recorder
         self.time_list = []
@@ -66,7 +66,7 @@ class Policy:
         self.colo_df = pd.read_csv("analyzer/single_data.csv")
 
     def get_time_series_data(self, cluster):
-        self.time_df = pd.read_csv(f"predictor/{cluster}_throughput_pred.csv", parse_dates=["time"])
+        self.time_df = pd.read_csv(f"predictor/{cluster}_throughput_pred.csv", parse_dates=["time"]) #predictor/Venus_throughput_pred.csv
 
         self.time_df["time"] = self.time_df["time"] - pd.Timestamp(self.time_df["time"][0])
         self.time_df["time"] = self.time_df["time"].map(lambda x: x.seconds + 3600 * 24 * x.days)
@@ -74,7 +74,7 @@ class Policy:
         # # self.time_df = self.time_df.set_index("time")
 
     def get_profile_scaling_data(self, cluster):
-        self.profile_scaling_df = pd.read_csv(f"log/{cluster}_Sept/profvc/profvc_scaling.csv")
+        self.profile_scaling_df = pd.read_csv(f"log/{cluster}_Sept/profvc/profvc_scaling.csv") #log/Venus_Sept/profvc/profvc_scaling.csv
         self.scaling_time_list = self.profile_scaling_df["time"].astype("int").tolist()
         assert self.profile_scaling_df["scaling_num"].sum() == 0
         if cluster == "Venus" and self._vc_name == "vcYVn":

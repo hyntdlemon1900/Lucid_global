@@ -7,7 +7,7 @@ class LeastGPUFirstProfiler(Profiler):
             trace, scale, time_limit, prof_gpu_limit, placement, log_dir, logger, start_ts
         )
         self._name = "lgfprof"
-        self.cluster_name = log_dir.split("/")[-1].split("_")[0]
+        self.cluster_name = log_dir.split("/")[-1].split("_")[0] # 'Venus'
         self.get_time_series_data(self.cluster_name)
         self.enable_scaling = True if self.cluster_name == "Venus" else False
         self.node_scaling_time = 0
@@ -20,7 +20,7 @@ class LeastGPUFirstProfiler(Profiler):
 
             """1. Check & Release End Jobs"""
             run_ls = self.run_list.copy()  # Avoid list.remove() issue
-            for job in run_ls:
+            for job in run_ls:  # 处理running job
                 if self.time == job["end_time"]:
                     if job["toskip"] == 1:
                         job["remain"] = 0
@@ -33,26 +33,26 @@ class LeastGPUFirstProfiler(Profiler):
             # New Job
             for idx in range(prev_index, self.total_job_num):
                 job = self.trace.job_list[idx]
-                if job["gpu_num"] > self.gpu_limit:
+                if job["gpu_num"] > self.gpu_limit: # 直接跳过 不会被profile
                     self.end_job_num += 1
                     prev_index = idx + 1
                 else:
-                    if job["submit_time"] == self.time:
+                    if job["submit_time"] == self.time: #!
                         self.que_list.append(job)
                         prev_index = idx
                     elif job["submit_time"] > self.time:
                         break
 
-            # Pend Job
+            # Pend Job 待调度job
             # NOTE: Sort by Job GPU Num -- LGF
             self.que_list.sort(key=lambda x: x.__getitem__("gpu_num"))
             # self.que_list.sort(key=lambda x: x.__getitem__("submit_time"))
             que_ls = self.que_list.copy()
             for job in que_ls:
                 if self.job_placer(job):
-                    job["profiled"] = 1
+                    job["profiled"] = 1  # 没有进入过队列的job不会被profile
                     job["start_time"] = self.time
-                    job["profqueue"] = self.time - job["submit_time"]
+                    job["profqueue"] = self.time - job["submit_time"]  # job在队列里等待的时间
                     job["queue"] = job["profqueue"]
                     if job["duration"] <= self.time_limit:
                         job["end_time"] = job["start_time"] + job["duration"]
@@ -77,8 +77,8 @@ class LeastGPUFirstProfiler(Profiler):
                     self.time % 100 == 0
                     and len(self.que_list) < 5
                     and self._vc.node_num == self._vc.base_node_num + self.node_scaling_num
-                    and len(self._vc.idle_node_list()) >= self.node_scaling_num
-                    and self._vc.check_node_inside_idle_vc(self._vc.temp_node_num_base)
+                    and len(self._vc.idle_node_list()) >= self.node_scaling_num   # 确认存在空闲node
+                    and self._vc.check_node_inside_idle_vc(self._vc.temp_node_num_base)  #确认空闲的node是scale node
                 ):
                     if self.check_future_cluster_throughput() <= self.gpu_limit * 5:
                         self._vc.update_vc_node(change_node_num=-1 * self.node_scaling_num)

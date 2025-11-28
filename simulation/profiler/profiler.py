@@ -25,7 +25,7 @@ class Profiler:
 
         self._vc = self.init_prof_vc()
         self._vc_name = self._vc.vc_name
-        self.gpu_limit = self.set_gpu_limit()
+        self.gpu_limit = self.set_gpu_limit() # 8
 
         self.total_job_num = self.trace.job_num()
         self.que_list = []  # Pending Jobs
@@ -110,21 +110,21 @@ class Profiler:
             print("No Job in VC: ", self._vc_name)
             raise NotImplementedError
 
-        sum_prof = df["profiled"].sum()
-        frac_prof = round(sum_prof / self.total_job_num * 100, 3)
-        sum_skip = df["toskip"].sum()
-        frac_skip = round(sum_skip / self.total_job_num * 100, 3)
-        avg_que = round(df["profqueue"].mean(), 2)
+        sum_prof = df["profiled"].sum() # 被 profile 的作业总数
+        frac_prof = round(sum_prof / self.total_job_num * 100, 3) # 被 profile 作业占全部作业的百分比
+        sum_skip = df["toskip"].sum() #被跳过（因为很短/早结束）的作业数
+        frac_skip = round(sum_skip / self.total_job_num * 100, 3) #跳过作业占比
+        avg_que = round(df["profqueue"].mean(), 2) # 被 profile 作业的平均排队时间
 
         self.logger.info(
             f"{self._vc_name} | Profiled Job Num: {sum_prof} ({frac_prof}%) | Finish in Profile: {sum_skip} ({frac_skip}%) | Average Queue: {avg_que}"
         )
 
-        path = f"{self._log_dir}/logfile/{self._vc_name}"
+        path = f"{self._log_dir}/logfile/{self._vc_name}" # './log/Venus_Sept/logfile/profvc'
         if not os.path.exists(path):
             os.makedirs(path)
         df.to_csv(
-            f"{path}/{policy_name}_{self._placement}_time{self.time_limit}_scale{self.scale}_factor{self.prof_gpu_limit}_log.csv",
+            f"{path}/{policy_name}_{self._placement}_time{self.time_limit}_scale{self.scale}_factor{self.prof_gpu_limit}_log.csv", # ./log/Venus_Sept/logfile/profvc/lgfprof_consolidate_time200_scale2_factor4_log.csv
             index=False,
         )
 
@@ -143,12 +143,12 @@ class Profiler:
         }
         seq = pd.DataFrame(seq_dict)
         seq["gpu_utilization"] = ((seq["total_gpu_num"] - seq["idle_gpu_num"]) / seq["total_gpu_num"]).round(3)
-        seq.to_csv(f"{self._log_dir}/{self._vc_name}/{policy_name}_{self._placement}_{self._vc_name}_seq.csv", index=False)
+        seq.to_csv(f"{self._log_dir}/{self._vc_name}/{policy_name}_{self._placement}_{self._vc_name}_seq.csv", index=False) # ./log/Venus_Sept/profvc/lgfprof_consolidate_profvc_seq.csv
 
         # Scaling Sequence
         scaling_dict = {"time": self.scaling_time_list, "scaling_num": self.scaling_num_list}
         scaling = pd.DataFrame(scaling_dict)
-        scaling.to_csv(f"{self._log_dir}/{self._vc_name}/{self._vc_name}_scaling.csv", index=False)
+        scaling.to_csv(f"{self._log_dir}/{self._vc_name}/{self._vc_name}_scaling.csv", index=False)# # ./log/Venus_Sept/profvc/profvc_scaling.csv
 
     def pend_job_num_small(self):
         job_num = 0

@@ -14,29 +14,215 @@ from policy import (
     Tiresias,
 )
 from profiler import LeastGPUFirstProfiler
+import random
+import numpy as np
 
 sys.path.append("..")
 
+VC_NUM_Venus_train = 15
+VC_NAME_LIST_Venus_train = ['vcEwI','vcWoR','vcHvQ','vcvGl','vc8Gr','vcKrE','vchbv','vcP2J','vcLTP','vcJLV','vcJkd','vcsBT','vcefl','vcvlY','vcOhe','vccJW','vc6YE','vcgkz']
+
+VC_NUM_Venus_eval = 15
+VC_NAME_LIST_Venus_eval = ['vcEwI','vcWoR','vcHvQ','vcvGl','vc8Gr','vcKeu','vcKrE','vcYVn','vchbv','vcLTP','vchA3','vcJsw','vcefl','vcvlY','vcgkz']
 PROFILER_ENABLED_SCHEDULERS = ["lucid"]
 
+# (trace, VC_NUM_Venus, all_vc_list, args.placer, log_dir, ['fifo', 'fifo', 'fifo'], logger, start_ts, [None, None, None], [None, None, None])
+class GlobalScheduler:
+    def __init__(self, global_policy, trace, vc_name, cluster_num, vc_list, placement,
+                 log_dir, policy_list, logger, start_ts, estimator_list, updater_list):
+        self.global_policy = global_policy
+        self.trace = trace.vc_trace(vc_name)
+        self.vc_name = vc_name
+        self.cluster_num = cluster_num
+        self.vc_list = vc_list
+        self.placement = placement
+        self.log_dir = log_dir
+        self.policy_list = policy_list
+        self.logger = logger
+        self.start_ts = start_ts # 13219200
+        self.estimator_list = estimator_list
+        self.updater_list = updater_list
 
-def simulate_vc(trace, vc, placement, log_dir, policy, logger, start_ts, *args):
-    if policy == "sjf":
-        scheduler = ShortestJobFirst(trace, vc, placement, log_dir, logger, start_ts)
-    elif policy == "fifo":
-        scheduler = FirstInFirstOut(trace, vc, placement, log_dir, logger, start_ts)
-    elif policy == "srtf":
-        scheduler = ShortestRemainingTimeFirst(trace, vc, placement, log_dir, logger, start_ts)
-    elif policy == "qssf":
-        scheduler = QuasiShortestServiceFirst(trace, vc, placement, log_dir, logger, start_ts, args[0])
-    elif policy == "lucid":
-        scheduler = Lucid(trace, vc, placement, log_dir, logger, start_ts, args[0], args[1])
-    elif policy == "tiresias":
-        scheduler = Tiresias(trace, vc, placement, log_dir, logger, start_ts)
-    scheduler.simulate()
-    logger.info(f"Finish {vc.vc_name}")
-    return True
+        self.scheduler_list = []
+        self.total_job_num = self.trace.job_num()
+        self.end_job_num = 0
+        self.time = 0
+        self._init_schedulers()
 
+        self.run_list = []
+        self.que_list = []
+
+        # Time Sequence Recorder
+        self.total_gpu_num =[]
+        self.idle_gpu_num = []
+        self.pend_gpu_num = []
+        self.run_job_num = []
+        self.pend_job_num = []
+        self.pend_job_num_less_8 = []
+        self.total_node_num = []
+        self.consolidate_node_num = []
+        self.shared_node_num = []  # >=2 jobs on one node
+        self.sm_util = []
+        self.gmem_util = []
+        self.sm_util_active = []
+        self.gmem_util_active = []
+
+        self._rr_counter = 0
+
+    def _init_schedulers(self):
+        for i in range(self.cluster_num):
+            policy = self.policy_list[i]
+            vc = self.vc_list[i]
+            estimator = self.estimator_list[i]
+            updater = self.updater_list[i]
+
+            if policy == "sjf":
+                scheduler = ShortestJobFirst(vc, self.placement, self.log_dir, self.logger, estimator, updater)
+            elif policy == "fifo":
+                scheduler = FirstInFirstOut(vc, self.placement, self.log_dir, self.logger, estimator, updater)
+            elif policy == "srtf":
+                scheduler = ShortestRemainingTimeFirst(vc, self.placement, self.log_dir, self.logger, estimator, updater)
+            elif policy == "qssf":
+                scheduler = QuasiShortestServiceFirst(vc, self.placement, self.log_dir, self.logger, estimator, updater)
+            elif policy == "lucid":
+                scheduler = Lucid(vc, self.placement, self.log_dir, self.logger, estimator, updater)
+            elif policy == "tiresias":
+                scheduler = Tiresias(vc, self.placement, self.log_dir, self.logger, estimator, updater)
+            else:
+                raise ValueError(f"Unsupported scheduling policy: {policy}")
+            
+            self.scheduler_list.append(scheduler)
+
+    def run(self):
+        self.time = self.start_ts
+        prev_index = 0
+        job_list = self.trace.job_list # len = 7603
+
+        while self.end_job_num != self.total_job_num:
+            jobs_to_allocate = []
+
+            for idx in range(prev_index, self.total_job_num):
+                job = job_list[idx]
+                if job["submit_time"] == self.time:
+                    status = self.seq_recorder()
+                    cluster_idx = self.select_cluster(status)  # External function, assumed available
+                    jobs_to_allocate.append((job, cluster_idx))
+                    prev_index = idx + 1
+                elif job["submit_time"] > self.time:
+                    break
+
+            self.end_job_num = 0
+            for i in range(self.cluster_num):
+                jobs_for_this_cluster = [job for job, cid in jobs_to_allocate if cid == i]
+                if jobs_for_this_cluster:
+                    self.end_job_num += self.scheduler_list[i].simulate(jobs_for_this_cluster, self.time)
+                else:
+                    self.end_job_num += self.scheduler_list[i].simulate(None, self.time)
+
+            if self.end_job_num == 509:
+                print("watch out")
+            self.time += 1
+
+            if self.time % 10000 == 0:
+                self.run_list = []
+                self.que_list = []
+                for i in range(self.cluster_num):
+                    self.run_list += self.scheduler_list[i].run_list
+                    self.que_list += self.scheduler_list[i].que_list
+                self.logger.info(
+                    f"{self.vc_name} | Time: {int(self.time)} | "
+                    f"Total Job: {self.total_job_num} | End job: {self.end_job_num}| Running job: {len(self.run_list)} | Pending job: {len(self.que_list)}"
+                )
+        self.logger.info(f"Finish {self.vc_name}")
+
+        if not os.path.exists(os.path.join(self.log_dir, self.vc_name)):
+            os.mkdir(os.path.join(self.log_dir, self.vc_name))
+
+        df = pd.DataFrame(self.trace.job_list)
+
+        if len(df) == 0:
+            print("No Job in VC: ", self.vc_name)
+        else:
+            df["jct"] = df["end_time"] - df["submit_time"]
+            avg_jct = round(df["jct"].mean(), 2)
+            avg_que = round(df["queue"].mean(), 2)
+            self.logger.info(f"{self.vc_name} | Average JCT: {avg_jct} | Average Queue: {avg_que}")
+
+            df.to_csv(f"{self.log_dir}/{self.vc_name}/{self.vc_name}_log.csv", index=False)
+
+        return True
+    
+    def seq_recorder(self):
+        self.total_gpu_num =[]
+        self.idle_gpu_num = []
+        self.pend_gpu_num = []
+        self.run_job_num = []
+        self.pend_job_num = []
+        self.pend_job_num_less_8 = []
+        self.total_node_num = []
+        self.consolidate_node_num = []
+        self.shared_node_num = []  # >=2 jobs on one node
+        self.sm_util = []
+        self.gmem_util = []
+        self.sm_util_active = []
+        self.gmem_util_active = []
+
+        for i in range(self.cluster_num):
+            self.total_gpu_num.append(self.scheduler_list[i]._vc.total_gpus)                                     # 总GPU数
+            self.idle_gpu_num.append(self.scheduler_list[i]._vc.vc_free_gpus())                                  # 空闲GPU数量
+            self.pend_gpu_num.append(sum(job.__getitem__("gpu_num") for job in self.scheduler_list[i].que_list)) # 队列中job需要GPU数量
+            self.run_job_num.append(len( self.scheduler_list[i].run_list))                                       # 运行job数
+            self.pend_job_num.append(len( self.scheduler_list[i].que_list))                                      # 排队job数
+            self.pend_job_num_less_8.append(self.scheduler_list[i].pend_job_num_small())                         # 队列中需要GPU数目小于8的job数
+            self.total_node_num.append( self.scheduler_list[i]._vc.node_num)                                     # 总节点数
+            self.consolidate_node_num.append( self.scheduler_list[i]._vc.consolidate_node_num())                 # 只运行一个job的节点数
+            self.shared_node_num.append( self.scheduler_list[i]._vc.shared_node_num())                           # 运行job数大于1的节点数
+            self.sm_util.append( self.scheduler_list[i]._vc.check_vc_sm_util())                                  # 所有节点gpu显存利用率均值
+            self.gmem_util.append( self.scheduler_list[i]._vc.check_vc_gmem_util())                              # 所有节点内存占用均值
+            self.sm_util_active.append( self.scheduler_list[i]._vc.check_vc_active_sm_util())                    # 所有节点active gpu显存利用率均值
+            self.gmem_util_active.append( self.scheduler_list[i]._vc.check_vc_active_gmem_util())                # 所有节点active gpu内存利用率均值
+        status = Status(self.total_gpu_num, self.idle_gpu_num, self.pend_gpu_num, self.run_job_num, self.pend_job_num, self.pend_job_num_less_8, self.total_node_num, self.consolidate_node_num, self.shared_node_num, self.sm_util, self.gmem_util, self.sm_util_active, self.gmem_util_active)
+        return status
+
+    def select_cluster(self, status):
+        if self.global_policy == "round_robin":
+            idx = self._rr_counter % self.cluster_num
+            self._rr_counter += 1
+            return idx
+        
+        if self.global_policy == "random":
+            return random.randrange(self.cluster_num)
+        
+        if self.global_policy == "max_free_gpus":
+            lst = status.idle_gpu_num
+            return lst.index(max(lst))
+
+        if self.global_policy == "min_load_first":
+            lst = np.sum([np.array(status.total_gpu_num), -np.array(status.idle_gpu_num), np.array(status.pend_gpu_num)], axis=0)
+            return int(np.argmin(lst))  # 返回最小值索引
+        
+class Status:
+    """
+    Experience pool for collecting trajectories.
+    """
+    def __init__(self, total_gpu_num, idle_gpu_num, pend_gpu_num, run_job_num, pend_job_num, pend_job_num_less_8, total_node_num, consolidate_node_num, shared_node_num, sm_util, gmem_util, sm_util_active, gmem_util_active):
+        self.total_gpu_num = total_gpu_num
+        self.idle_gpu_num = idle_gpu_num
+        self.pend_gpu_num = pend_gpu_num
+        self.run_job_num = run_job_num
+        self.pend_job_num = pend_job_num
+        self.pend_job_num_less_8 = pend_job_num_less_8
+        self.total_node_num = total_node_num
+        self.consolidate_node_num = consolidate_node_num
+        self.shared_node_num = shared_node_num
+        self.sm_util = sm_util
+        self.gmem_util = gmem_util
+        self.sm_util_active = sm_util_active
+        self.gmem_util_active = gmem_util_active
+
+    def __len__(self):
+        return len(self.states)
+    
 
 def trace_profile(trace, scale, time_limit, profiler_factor, placement, log_dir, logger, start_ts):
     profiler = LeastGPUFirstProfiler(trace, scale, time_limit, profiler_factor, placement, log_dir, logger, start_ts)
@@ -58,7 +244,7 @@ def get_available_placers():
     return ["random", "consolidate", "consolidateFirst"]
 
 
-def trace_process(dir, date_range, read_full):
+def trace_process(dir, date_range, read_full, cluster_num):
     start = "2020-04-01 00:00:00"
     if read_full == False:
         df = pd.read_csv(
@@ -68,8 +254,8 @@ def trace_process(dir, date_range, read_full):
         )
     else:
         df = pd.read_csv(
-            dir + "/cluster_full_log.csv",
-            parse_dates=["submit_time"],
+            dir + "/cluster_full_log.csv", # './data/Venus/cluster_full_log.csv'
+            parse_dates=["submit_time"], # 自动将 submit_time 转为时间戳
             usecols=[
                 "job_id",
                 "user",
@@ -93,16 +279,11 @@ def trace_process(dir, date_range, read_full):
     # Consider gpu jobs only
     df = df[df["gpu_num"] > 0]
 
-    # VC filter
-    vc_df = pd.read_csv(dir + "/vc_config.csv", index_col=0)
-    vc_list = vc_df.index.to_list()
-    df = df[df["vc"].isin(vc_list)]
+    df.sort_values(by="submit_time", inplace=True)  #114821
+    df = df[df["submit_time"] >= pd.Timestamp(start)] # 114749 筛选出大于2020-04-01提交的job
+    df["submit_time"] = df["submit_time"].apply(lambda x: int(datetime.datetime.timestamp(pd.Timestamp(x)))) 
 
-    df.sort_values(by="submit_time", inplace=True)
-    df = df[df["submit_time"] >= pd.Timestamp(start)]
-    df["submit_time"] = df["submit_time"].apply(lambda x: int(datetime.datetime.timestamp(pd.Timestamp(x))))
-
-    # Normalizing
+    # Normalizing 以第一个job为时间 0 点
     df["submit_time"] = df["submit_time"] - df.iloc[0]["submit_time"]
 
     df["remain"] = df["duration"]
@@ -110,10 +291,12 @@ def trace_process(dir, date_range, read_full):
     df[["ckpt_times", "queue", "jct"]] = 0
     df["status"] = None
 
-    # Slicing simulation part
+    # Slicing simulation part   所有提交时间在 2020-09-01 到 2020-09-26 的作业
     begin = (pd.Timestamp(date_range[0]) - pd.Timestamp(start)).total_seconds()
     end = (pd.Timestamp(date_range[1]) - pd.Timestamp(start)).total_seconds()
-    df = df[(df["submit_time"] >= begin) & (df["submit_time"] <= end)]
+    df = df[(df["submit_time"] >= begin) & (df["submit_time"] <= end)] # 筛选出2020-09-01 到 2020-09-26的job
+    begin = np.ceil(begin / cluster_num)
+    df["submit_time"] = np.ceil(df["submit_time"] / cluster_num)
 
     df.sort_values(by="submit_time", inplace=True)
     df.reset_index(inplace=True, drop=True)
@@ -310,7 +493,7 @@ def cluster_concatenate(policy, placer, log_dir, dir):
         vc_log = pd.read_csv(f"{log_dir}/{vc}/{prefix}_{vc}_log.csv")
         cluster_log = pd.concat([cluster_log, vc_log])
     cluster_log.sort_values(by="submit_time", inplace=True)
-    cluster_log.to_csv(f"{log_dir}/all/{prefix}_all_log.csv", index=False)
+    cluster_log.to_csv(f"{log_dir}/all/{prefix}_all_log.csv", index=False) # log/Venus_Sept/all/lucid_consolidate_all_log.csv
 
     """Seq"""
     cluster_seq = pd.DataFrame()
@@ -336,7 +519,7 @@ def cluster_concatenate(policy, placer, log_dir, dir):
         cluster_seq["gpu_utilization"] = (
             (cluster_seq["total_gpu_num"] - cluster_seq["idle_gpu_num"]) / cluster_seq["total_gpu_num"]
         ).round(3)
-    cluster_seq.to_csv(f"{log_dir}/all/{prefix}_all_seq.csv", index=False)
+    cluster_seq.to_csv(f"{log_dir}/all/{prefix}_all_seq.csv", index=False)   # log/Venus_Sept/all/lucid_consolidate_all_seq.csv
 
 
 def cluster_analysis(placer, log_dir, dir):
@@ -371,30 +554,30 @@ def cluster_analysis(placer, log_dir, dir):
 
     jct_avg = jct_avg.astype(int)
     que_avg = que_avg.astype(int)
-    jct_avg.to_csv(f"{log_dir}/jct_avg_{placer}.csv")
-    que_avg.to_csv(f"{log_dir}/que_avg_{placer}.csv")
+    jct_avg.to_csv(f"{log_dir}/jct_avg_{placer}.csv") # /root/Lucid/simulation/log/Venus_Sept/jct_avg_consolidate.csv
+    que_avg.to_csv(f"{log_dir}/que_avg_{placer}.csv") # /root/Lucid/simulation/log/Venus_Sept/que_avg_consolidate.csv
 
 
-def get_trace(experiment_name, trace_dir, read_full, idx=None):
+def get_trace(experiment_name, trace_dir, read_full, cluster_num, idx=None):
     if "Philly" in experiment_name:
         trace_range = ("2017-10-01 00:00:00", "2017-10-07 23:59:00")
         trace_df, start_ts = trace_philly_process(trace_dir, trace_range, read_full)
     elif "Pollux" in experiment_name:
         trace_df, start_ts = trace_pollux_process(trace_dir, idx)
     else:
-        if "Sept" in experiment_name:
+        if "train" in experiment_name:
+            trace_range = ("2020-04-07 00:00:00", "2020-07-06 23:59:00")
+            trace_df, start_ts = trace_process(trace_dir, trace_range, read_full, cluster_num)
+        elif "eval" in experiment_name:
             trace_range = ("2020-09-01 00:00:00", "2020-09-26 23:59:00")
-            trace_df, start_ts = trace_process(trace_dir, trace_range, read_full)
-        elif "July" in experiment_name:
-            trace_range = ("2020-07-01 00:00:00", "2020-07-31 23:59:00")
-            trace_df, start_ts = trace_process(trace_dir, trace_range, read_full)
+            trace_df, start_ts = trace_process(trace_dir, trace_range, read_full, cluster_num)
         else:
             raise ValueError
 
     return trace_df, start_ts
 
 
-def profiler_config(experiment_name, vc_dict):
+def profiler_config(experiment_name, vc_dict): # experiment_name = 'Venus_Sept' vc_dict读取字vc_config
     cluster = experiment_name.split("_")[0]
     profile_scale = {"Venus": 2, "Philly": 2}
     profile_time = {"Venus": 200, "Philly": 80}
@@ -408,7 +591,7 @@ def profiler_config(experiment_name, vc_dict):
         vc_dict["vc8Gr"] -= 1
         vc_dict["vcefl"] -= 1
         # vc_dict["vcYVn"] -= 1  # For elastic scaling
-    return vc_dict, scale, time, factor
+    return vc_dict, scale, time, factor  # 手动配置的参数
 
 
 def check_profiler_scale_available(experiment_name, scale, vc_dict, prof_locate_vc=None):

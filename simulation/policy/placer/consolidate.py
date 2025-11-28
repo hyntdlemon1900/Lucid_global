@@ -2,7 +2,7 @@ class ConsolidatePlacement:
     def __init__(self, vc):
         self.name = "consolidate"
         self.vc = vc
-        self.avail_nodes = self.vc.avail_node_list()
+        self.avail_nodes = self.vc.avail_node_list() #返回可用node（free gpu num > 0）
 
     """
         Enforce consolidate placement
@@ -69,7 +69,7 @@ class ConsolidatePlacement:
 
         """ Placement """
         if select_flag:
-            for (node, req_gpu) in alloc_nodes:
+            for (node, req_gpu) in alloc_nodes:   # (node, job_gpu_num)
                 allocate_gpus = node.allocate_gpu(req_gpu, job)
                 job["nodes"].append({node.node_name: allocate_gpus})
             return True

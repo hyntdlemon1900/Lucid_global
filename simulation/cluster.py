@@ -7,11 +7,11 @@ class Cluster:
         self._num_gpus_per_node = num_gpus_per_node
         self._num_cpus_per_node = num_cpus_per_node
         self.vc_num = len(vc_dict)
-        self.node_num = sum(vc_dict.values())
+        self.node_num = sum(vc_dict.values()) # vc总节点数 133
         self.vc_list = []
         self.init_cluster_vc()
-        self.total_gpus = sum(vc.total_gpus for vc in self.vc_list)
-        self.total_cpus = sum(vc.total_cpus for vc in self.vc_list)
+        self.total_gpus = sum(vc.total_gpus for vc in self.vc_list) # 1064 = 133×8
+        self.total_cpus = sum(vc.total_cpus for vc in self.vc_list) # 12768 = 133×96
 
     def init_cluster_vc(self):
         for k, v in self._vc_dict.items():
@@ -28,13 +28,13 @@ class Cluster:
 # Virtual Cluster
 class VC:
     def __init__(self, vc_name, node_num, num_gpus_per_node, num_cpus_per_node):
-        self.vc_name = vc_name
+        self.vc_name = vc_name # 'profvc'
         self.node_num = node_num
-        self.base_node_num = node_num
-        self._num_gpus_per_node = num_gpus_per_node
-        self._num_cpus_per_node = num_cpus_per_node
+        self.base_node_num = node_num # 2
+        self._num_gpus_per_node = num_gpus_per_node # 8
+        self._num_cpus_per_node = num_cpus_per_node # 96 cpu core
         self.node_list = []
-        self.init_vc_node()
+        self.init_vc_node() # 初始化2个node
         self.total_gpus = num_gpus_per_node * node_num
         self.total_cpus = num_cpus_per_node * node_num
 
@@ -222,8 +222,8 @@ class VC:
 class Node:
     def __init__(self, node_name, num_gpus, num_cpus):
         self.node_name = node_name
-        self.num_gpus = num_gpus
-        self.num_cpus = num_cpus
+        self.num_gpus = num_gpus # 8
+        self.num_cpus = num_cpus # 8
         self.previous_node_name = node_name
 
         self.job_num = 0

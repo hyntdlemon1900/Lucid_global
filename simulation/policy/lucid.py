@@ -22,19 +22,19 @@ class Lucid(Policy):
     def enable_colocate(self):
         self._vc.colocate_enable = 1
 
-    def obtain_workload_estimates(self):
-        estimate = self.estimator.data
+    def obtain_workload_estimates(self):  # 从外部预测器 estimator 获取每个job的 priority
+        estimate = self.estimator.data # 存了每个job的优先级
         for job in self.trace.job_list:
             if job["toskip"] == 0:
                 job["priority"] = estimate[estimate["job_id"] == job["job_id"]]["priority"].iloc[0] * job["gpu_num"]
 
-    def obtain_colocate_analysis(self):
-        self.get_colocate_data()
+    def obtain_colocate_analysis(self): # 分析哪些job合适合共享（来自 label）
+        self.get_colocate_data()  # analyzer/single_data.csv
         df = self.colo_df
         for job in self.trace.job_list:
             if job["toskip"] == 0:
                 m, b, d, a = job["model"], job["batchsize"], job["dataset"], job["amp"]
-                info = df.query(" model == @m and batchsize == @b and dataset == @d and amp == @a")
+                info = df.query(" model == @m and batchsize == @b and dataset == @d and amp == @a") #筛选行
                 job["sharescore"] = info["label"].values[0]
 
     def obtain_cluster_prediction(self):
@@ -49,7 +49,7 @@ class Lucid(Policy):
                 return job
 
     # Prescient Adaptive Sharing
-    def check_pas(self):
+    def check_pas(self): # 判断当前是否启用共享
         if self.estimator.cluster_name == "Venus" and self.check_future_cluster_throughput() <= 2:
             return 0
         else:
@@ -57,14 +57,14 @@ class Lucid(Policy):
 
         # return 1
 
-    def colocate_update(self, job, target_job):
+    def colocate_update(self, job, target_job):  # 调整两个共享job的执行速度
         speed1, speed2, gutil, gmem = self.updater.query_info(job, target_job)
         job["exclusive"], target_job["exclusive"] = 0, 0
         job["rate"], target_job["rate"] = speed1, speed2
         job["Tcolocate"] = self.time
         return gutil, gmem
 
-    def speed_recover(self, job_list):
+    def speed_recover(self, job_list): # 共享job结束后恢复独占状态
         if isinstance(job_list, list):
             for job in job_list:
                 job["exclusive"] = 1
@@ -89,7 +89,7 @@ class Lucid(Policy):
         else:
             return False
 
-    def job_pair_picker_time_aware(self, job):
+    def job_pair_picker_time_aware(self, job):  # 智能选择可共享的正在运行作业
         mem_limit = GPU_MEMORY_LIMITATION - job["gmem"]
         affinity_jobs = []
         for j in self.run_list:
@@ -135,7 +135,7 @@ class Lucid(Policy):
                         colo_job_id = self._vc.check_vc_colocate_jobs(job)
                         if colo_job_id:
                             colo_job = self.obtain_job_from_id(colo_job_id)
-                            self.speed_recover(colo_job)
+                            self.speed_recover(colo_job)  # 共享作业结束后恢复独占状态
 
                     self._vc.release_resource(job)
                     self.run_list.remove(job)
@@ -162,7 +162,7 @@ class Lucid(Policy):
                     break
 
             """3. Sort Job According to Priority"""
-            self.que_list.sort(key=lambda x: x.__getitem__("priority"))
+            self.que_list.sort(key=lambda x: x.__getitem__("priority")) # 按 priority 排序调度
 
             """4. Allocate Job"""
             que_ls = self.que_list.copy()
@@ -174,13 +174,13 @@ class Lucid(Policy):
                         self.job_allocate_info_update(job)
                     else:
                         break
-            else:
+            else:  # 启用共享调度
                 for job in que_ls:
                     if job["gpu_num"] <= 8:
                         # target_job = self.ablation_picker(job)
-                        target_job = self.job_pair_picker_time_aware(job)
+                        target_job = self.job_pair_picker_time_aware(job) # 智能选择可共享的正在运行作业
                         if target_job:
-                            gutil, gmem = self.colocate_update(job, target_job)
+                            gutil, gmem = self.colocate_update(job, target_job)  # 调整两个共享作业的执行速度
                             assert self.colocate_job_placer(job, target_job, gutil, gmem)
                             self.job_allocate_info_update(job)
                         else:
