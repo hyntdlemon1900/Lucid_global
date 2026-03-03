@@ -1,8 +1,8 @@
 class ConsolidatePlacement:
-    def __init__(self, vc):
+    def __init__(self, cl):
         self.name = "consolidate"
-        self.vc = vc
-        self.avail_nodes = self.vc.avail_node_list() #返回可用node（free gpu num > 0）
+        self.cl = cl
+        self.avail_nodes = self.cl.avail_node_list() #返回可用node（free gpu num > 0）
 
     """
         Enforce consolidate placement
@@ -13,7 +13,7 @@ class ConsolidatePlacement:
     """
 
     def update_avail_nodes(self):
-        self.avail_nodes = self.vc.avail_node_list()
+        self.avail_nodes = self.cl.avail_node_list()
 
     def consolidateSelect(self, job_gpu_num):
         self.update_avail_nodes()
@@ -55,14 +55,14 @@ class ConsolidatePlacement:
                     return False, alloc_nodes
 
     def place(self, job):
-        vc_free_gpu_num = self.vc.vc_free_gpus()
+        cl_free_gpu_num = self.cl.cluster_free_gpus()
         job_gpu_num = job["gpu_num"]
 
         # Total Free GPU Check
-        if vc_free_gpu_num < job_gpu_num:
+        if cl_free_gpu_num < job_gpu_num:
             return False
 
-        if self.vc._num_gpus_per_node != 8:
+        if self.cl._num_gpus_per_node != 8:
             raise NotImplementedError
 
         select_flag, alloc_nodes = self.consolidateSelect(job_gpu_num)

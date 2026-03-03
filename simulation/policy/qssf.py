@@ -2,8 +2,8 @@ from .policy import Policy
 
 
 class QuasiShortestServiceFirst(Policy):
-    def __init__(self, vc, placement, log_dir, logger, estimator, updater):
-        super(QuasiShortestServiceFirst, self).__init__(vc, placement, log_dir, logger)
+    def __init__(self, cl, placement, log_dir, logger, estimator, updater):
+        super(QuasiShortestServiceFirst, self).__init__(cl, placement, log_dir, logger)
         self.estimator = estimator
         self.updater = updater
         self._name = "qssf"
@@ -22,7 +22,7 @@ class QuasiShortestServiceFirst(Policy):
                 job["remain"] = 0
                 job["status"] = "end"
                 self.end_job_num += 1
-                assert self._vc.release_resource(job) == True
+                assert self.cl.release_resource(job) == True
                 self.run_list.remove(job)
 
         """3. Assign Priority If Exist Job Pending"""

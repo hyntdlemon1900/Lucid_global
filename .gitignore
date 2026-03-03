@@ -22,3 +22,6 @@ _pycache__/
 
 # Other
 *.DS_Store
+
+simulation/data/
+*.csv

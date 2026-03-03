@@ -2,7 +2,7 @@ import sys
 
 sys.path.append("..")
 
-from cluster import VC
+from cluster import Cluster
 from policy.placer.consolidate import ConsolidatePlacement
 from policy.placer.consolidateFirst import ConsolidateFirstPlacement
 from policy.placer.random import RandomPlacement
@@ -54,7 +54,7 @@ class Profiler:
         return int(self.scale * self.prof_gpu_limit)
 
     def init_prof_vc(self):
-        return VC("profvc", self.scale, 8, 96)
+        return Cluster("profvc", self.scale, 8, 96)
 
     def init_placer(self):
         if self._placement == "consolidate":

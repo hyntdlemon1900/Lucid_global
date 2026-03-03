@@ -8,20 +8,16 @@ from .placer.random import RandomPlacement
 
 
 class Policy:
-    def __init__(self, vc, placement, log_dir, logger):
+    def __init__(self, cl, placement, log_dir, logger):
         self._placement = placement
-        self._vc = vc
-        self._vc_name = vc.vc_name
+        self.cl = cl
+        self.cl_name = cl.name
         self._log_dir = log_dir
-        #self.trace = trace.vc_trace(vc.vc_name)
         self.logger = logger
-        #self.start_ts = start_ts
 
-        #self.total_job_num = self.trace.job_num()
         self.que_list = []  # Pending Jobs
         self.run_list = []  # Running Jobs
         self.end_job_num = 0
-        #self.time = start_ts
 
         # Time Sequence Recorder
         self.time_list = []
@@ -40,20 +36,20 @@ class Policy:
         self.gmem_util_active = []
 
         self.placer = self.init_placer()
-        self.colocate_placer = ConsolidateWithSharePlacement(self._vc)
+        self.colocate_placer = ConsolidateWithSharePlacement(self.cl)
         self.colo_df = None
         self.time_df = None
         self.submit_time_list = None
 
-        self.vc_echo_scaling = False
+        self.echo_scaling = False
 
     def init_placer(self):
         if self._placement == "consolidate":
-            return ConsolidatePlacement(self._vc)
+            return ConsolidatePlacement(self.cl)
         if self._placement == "random":
-            return RandomPlacement(self._vc)
+            return RandomPlacement(self.cl)
         if self._placement == "consolidateFirst":
-            return ConsolidateFirstPlacement(self._vc)
+            return ConsolidateFirstPlacement(self.cl)
         raise NotImplementedError
 
     def job_placer(self, job):
@@ -78,7 +74,7 @@ class Policy:
         self.scaling_time_list = self.profile_scaling_df["time"].astype("int").tolist()
         assert self.profile_scaling_df["scaling_num"].sum() == 0
         if cluster == "Venus" and self._vc_name == "vcYVn":
-            self.vc_echo_scaling = True
+            self.echo_scaling = True
 
     def check_future_cluster_throughput(self):
         if len(self.time_df) == 0:

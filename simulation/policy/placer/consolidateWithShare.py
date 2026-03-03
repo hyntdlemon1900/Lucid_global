@@ -1,8 +1,8 @@
 class ConsolidateWithSharePlacement:
-    def __init__(self, vc):
+    def __init__(self, cl):
         self.name = "consolidate_share"
-        self.vc = vc
-        self.avail_nodes = self.vc.avail_node_list()
+        self.cl = cl
+        self.avail_nodes = self.cl.avail_node_list()
 
     """
         Enforce consolidate placement
